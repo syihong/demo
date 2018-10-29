@@ -1,0 +1,1 @@
+C:\xampp\php\php.exe D:\yunBang\test\Server_socket\server.php

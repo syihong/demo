@@ -1,0 +1,144 @@
+/**
+     * 公司后台管理 - 店面绩效报表(定时定时任务：每月1号延续上月绩效设置)(废弃)
+     * @author Sunyh
+     */
+    public function shopAchievementCron ()
+    {
+        $log_title = '公司后台 => 店面绩效报表(定时任务：每月1号延续上月绩效设置)，';
+        CommonController::logText($log_title . 'START');
+        try {
+            //事务开启
+            M()->startTrans();
+
+            //获取所有店面id
+            $shop_list = M('shop_info_last_normal l_si')
+                ->field('l_si.id as shop_id,l_si.shop_name,l_si.company_id,l_si.company_name,l_si.charge_league_id,l_si.charge_league_uname,l_si.charge_league_uphone')
+                ->join('LEFT JOIN lg_shop_league_info l_li ON l_si.id = l_li.from_shop_id')
+                ->where(['audit_state'=>5, 'state'=>1])
+                ->select();
+
+            if (empty($shop_list)) {
+                CommonController::logText($log_title . 'END，ERROR，获取店面失败，SQL：' . M()->getLastSql());
+                M()->rollback();
+                exit($log_title . '获取店面失败');
+            }
+
+            //获取上个月的年月日期
+            $last_month = date('Y-m', mktime(23, 59, 59, date('m', strtotime(date('Y-m')))-1, 01, date('Y', strtotime(date('Y-m')))));
+            $driver_proportion = $this->DRIVER_PROPORTION;
+            $hz_proportion = $this->HZ_PROPORTION;
+            $oil_proportion = $this->OIL_PROPORTION;
+            $etc_proportion = $this->ETC_PROPORTION;
+            $league_proportion = $this->LEAGUE_PROPORTION;
+            $car_proportion = $this->CAR_PROPORTION;
+
+            $shop_num = count($shop_list);
+            if($shop_num>0){
+                $achieve_data = array();
+
+                foreach ($shop_list as $k =>$v){
+
+                    //实时获取某店面某月销售数量
+                    $field_info = "(select count(*) from lg_salesman_locked_data l_d where l_si.id = l_d.shop_id AND l_d.data_type=1 AND l_d.state=1 
+                                AND DATE_FORMAT(l_d.add_time,'%Y-%m')= '".$last_month."' ) AS driver_reg_count,
+                           (select count(*) from lg_salesman_locked_data l_h where l_si.id = l_h.shop_id AND l_h.data_type=2 AND l_h.state=1
+                                AND DATE_FORMAT(l_h.add_time,'%Y-%m')= '".$last_month."' ) AS hz_reg_count,
+                           (select count(*) from lg_salesman_locked_data l_o where l_si.id = l_o.shop_id AND l_o.data_type=3 AND l_o.state=1
+                                AND DATE_FORMAT(l_o.add_time,'%Y-%m')= '".$last_month."' ) AS gas_station_count,
+                           (select count(*) from lg_salesman_locked_data l_e where l_si.id = l_e.shop_id AND l_e.data_type=4 AND l_e.state=1
+                                AND DATE_FORMAT(l_e.add_time,'%Y-%m')= '".$last_month."' ) AS etc_count,
+                           (select count(*) from lg_shop_league_info l_li where l_si.id = l_li.from_shop_id AND l_li.state=1 
+                                AND DATE_FORMAT(l_li.add_time,'%Y-%m')= '".$last_month."' ) AS league_count,
+                           (select count(*) from lg_shop_buy_application l_ba where l_si.id = l_ba.shop_id AND l_ba.state=6 
+                                AND DATE_FORMAT(l_ba.add_time,'%Y-%m')= '".$last_month."' ) AS sale_car_count";
+
+                    $shop_month_sale= M('shop_info_last_normal l_si')
+                        ->field( $field_info)
+                        ->where( ['l_si.id'=>$v['shop_id']] )
+                        ->group('l_si.id')
+                        ->find();
+
+                    //获取所有店面id
+                    $shop_list = M('shop_info_last_normal')
+                        ->field('id as shop_id,shop_name,company_id,company_name,charge_league_id,charge_league_uname,charge_league_uphone')
+                        ->where(['charge_league_id'=> $v['charge_league_id'],'audit_state'=>5, 'state'=>1])
+                        ->select();
+
+                    $shop_month_sale['actual_achieve'] = 0;
+                    $shop_month_sale['driver_actual_achieve'] = 0;
+                    $shop_month_sale['hz_actual_achieve'] = 0;
+                    $shop_month_sale['league_actual_achieve'] = 0;
+                    $shop_month_sale['gas_actual_achieve'] = 0;
+                    $shop_month_sale['sale_car_actual_achieve'] = 0;
+                    $shop_month_sale['etc_actual_achieve'] = 0;
+
+
+
+                    if ($res_shop_sale['state'] !== 1) {
+                        CommonController::logText($log_title . 'END，ERROR，获取店面销售业绩失败，SQL：' . M()->getLastSql());
+                        M()->rollback();
+                        exit($log_title . '获取店面销售业绩失败，MSG：' . $res_shop_sale);
+                    }
+                    $shop_month_sale = $res_shop_sale['shop_month_sale'];
+
+                    $achieve_data[$k]['shop_id'] = $v['shop_id'];
+                    $achieve_data[$k]['shop_name'] = $v['shop_name'];
+                    $achieve_data[$k]['company_id'] = $v['company_id'];
+                    $achieve_data[$k]['company_name'] = $v['company_name'];
+                    $achieve_data[$k]['charge_league_id'] = $v['charge_league_id'];
+                    $achieve_data[$k]['charge_league_uname'] = $v['charge_league_uname'];
+                    $achieve_data[$k]['charge_league_uphone'] = $v['charge_league_uphone'];
+                    $achieve_data[$k]['achieve_time'] = $last_month;
+                    $achieve_data[$k]['driver_reg_count'] = $shop_month_sale['driver_reg_count'];
+                    $achieve_data[$k]['hz_reg_count'] = $shop_month_sale['hz_reg_count'];
+                    $achieve_data[$k]['gas_station_count'] = $shop_month_sale['gas_station_count'];
+                    $achieve_data[$k]['etc_count'] = $shop_month_sale['etc_count'];
+                    $achieve_data[$k]['league_count'] = $shop_month_sale['league_count'];
+                    $achieve_data[$k]['sale_car_count'] = $shop_month_sale['sale_car_count'];
+                    $achieve_data[$k]['driver_sys_achieve'] = $shop_month_sale['driver_reg_count'] * $driver_proportion;
+                    $achieve_data[$k]['hz_sys_achieve'] = $shop_month_sale['hz_reg_count'] * $hz_proportion;
+                    $achieve_data[$k]['gas_sys_achieve'] = $shop_month_sale['gas_station_count'] * $oil_proportion;
+                    $achieve_data[$k]['etc_sys_achieve'] = $shop_month_sale['etc_count'] * $etc_proportion;
+                    $achieve_data[$k]['league_sys_achieve'] = $shop_month_sale['league_count'] * $league_proportion;
+                    $achieve_data[$k]['sale_car_sys_achieve'] = $shop_month_sale['sale_car_count'] * $car_proportion;
+                    $achieve_data[$k]['total_sys_achieve'] = $shop_month_sale['driver_reg_count'] * $driver_proportion +
+                                                            $shop_month_sale['hz_reg_count'] * $hz_proportion +
+                                                            $shop_month_sale['gas_station_count'] * $oil_proportion +
+                                                            $shop_month_sale['etc_count'] * $etc_proportion +
+                                                            $shop_month_sale['league_count'] * $league_proportion +
+                                                            $shop_month_sale['sale_car_count'] * $car_proportion;
+
+                    $achieve_data[$k]['driver_actual_achieve'] = $shop_month_sale['driver_reg_count'] * $driver_proportion;
+                    $achieve_data[$k]['hz_actual_achieve'] = $shop_month_sale['hz_reg_count'] * $hz_proportion;
+                    $achieve_data[$k]['gas_actual_achieve'] = $shop_month_sale['gas_station_count'] * $oil_proportion;
+                    $achieve_data[$k]['etc_actual_achieve'] = $shop_month_sale['etc_count'] * $etc_proportion;
+                    $achieve_data[$k]['league_actual_achieve'] = $shop_month_sale['league_count'] * $league_proportion;
+                    $achieve_data[$k]['sale_car_actual_achieve'] = $shop_month_sale['sale_car_count'] * $car_proportion;
+                    $achieve_data[$k]['actual_achieve'] = $achieve_data[$k]['total_sys_achieve'];
+                    $achieve_data[$k]['add_time'] = $this->FORMAT_TIME_NOW;
+                    $achieve_data[$k]['send_time'] = NULL;
+                    $achieve_data[$k]['state'] = 1;
+
+                }
+            }
+
+            $res_add_achieve = M('shop_achievement')->addAll($achieve_data);
+            if (!(0 < $res_add_achieve)) {
+                CommonController::logText($log_title . 'END，ERROR，处理业绩失败，SQL：' . M()->getLastSql());
+                M()->rollback();
+                exit($log_title . '处理业绩失败');
+            }
+
+            M()->commit();
+            CommonController::logText($log_title . 'END，SUCCESS，共' . $shop_num . '个店面业绩信息汇总完毕');
+            exit($log_title . '处理完毕，共' . $shop_num . '个店面业绩信息汇总完毕');
+
+        } catch (\Exception $e) {
+            M()->rollback();
+            CommonController::logText($log_title . 'ERROR，CATCH_ERROR => ' . $e->getMessage());
+            CommonController::catchErrLog($log_title . 'ERROR，CATCH_ERROR => ' . $e->getMessage() . '【 ERROR_TRACE_INFO => ' . $e->getTraceAsString() . ' 】');
+            //发送提醒邮件
+            send_mail($this->SERVER_ERR_MAIL_TO, $log_title . '代码异常', 'METHOD：' . __METHOD__ . '，TRACE_MESSAGE：' . $e->getMessage() . '，TRACE_INFO：' . $e->getTraceAsString());
+            $this->encryptReturn($this->ERR_ARR['SERVER_ERROR'], 'CATCH_ERROR => ' . $e->getMessage());
+        }
+    }
